@@ -1,0 +1,9 @@
+# kafka_event_generator
+aiokafka
+kafka-python
+pydantic
+pydantic-settings
+python-dotenv
+
+# opensearch_index_monitor
+opensearch-py
