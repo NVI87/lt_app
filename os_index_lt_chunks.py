@@ -3,7 +3,6 @@ import time
 from datetime import datetime
 from opensearchpy import OpenSearch
 
-# HOST = "10.248.14.140"
 HOST = "localhost"
 PORT = 9204
 USE_SSL = True

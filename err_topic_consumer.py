@@ -7,13 +7,6 @@ from pathlib import Path
 from aiokafka import AIOKafkaConsumer
 
 
-# KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-# KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "events")
-# KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "json-file-writer")
-#
-# OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "./events"))
-# KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", '10.228.64.22:30093,10.228.64.23:30093,10.228.64.25:30093')
-# KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "intel-assist-index-errors-loc")
 KAFKA_GROUP_ID = os.getenv("KAFKA_GROUP_ID", "json-file-writer")
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 KAFKA_TOPIC = "intel-assist-index-errors-loc"

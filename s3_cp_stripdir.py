@@ -205,6 +205,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# python3 s3_cp_stripdir.py --endpoint https://file.aiagents.inno.local:9000 --access-key minio --secret-key minio-password --src-bucket gk-t1-sfera-prod-ppwi-search-copy --dst-bucket gk-t1-sfera-prod-ppwi-load-test --prefix dump/ --insecure
-# python3 s3_copy.py --endpoint localhost:9000 --access-key minioadmin --secret-key minioadmin --src-bucket gk-t1-sfera-prod-ppwi-search --dst-bucket gk-t1-sfera-prod-ppwi-search-copy --insecure --no-ssl-warn

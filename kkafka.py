@@ -349,36 +349,18 @@ async def main(csv_file_name, kafka_bootstrap, topic, cons_group_id):
     print(f"TOTAL MESSAGES: {count}")
 
 if __name__ == '__main__':
-    # csv_file = 'Stuck_task.csv'
-    # csv_file = 'export-ppwi-ii-migration.csv'
-    # csv_file = 'export-ppwi-ii-migration-cut.csv'
+
     csv_file = 'export-lt-all-types-1.csv'
 
-    # dev kafka
-    # kafka_bootstrap_servers = "10.228.64.22:30093,10.228.64.23:30093,10.228.64.25:30093"
-    # kafka_topic = "intel-assist-index"
-    # group_id = "etl-consumer-dev"
 
     # local kafka
     kafka_bootstrap_servers = 'localhost:9092'
-    # kafka_topic = "intel-assist-index-lt-prod"
-    # kafka_topic = "intel-assist-index-lt-prod-2"
-    # group_id = "etl-consumer-local-572"
 
-    # kafka_topic = 'intel-assist-index-lt1426'
-    # group_id = "etl-consumer-local-571"
-    # group_id = "etl-consumer-load-test-1"
     group_id = "etl-consumer-test-1070"
 
-    # test kafka
-    # kafka_bootstrap_servers = '10.228.64.21:30093,10.228.64.26:30093,10.228.64.27:30093'
-    # kafka_topic = "intel-assist-index-lt-prod-2"
-    # kafka_topic = "intel-assist-index-lt-etl"
-    # kafka_topic = "intel-assist-index"
+
     kafka_topic = "intel-assist-index-test-etl-11"
-    # kafka_topic = "intel-assist-index-test-etl"
-    # kafka_topic = "intel-assist-index-load-test-3"
-    # kafka_topic = "intel-assist-index-load-test-wstats-3"
+
 
 
     # group_id = "etl-consumer-test-200"
