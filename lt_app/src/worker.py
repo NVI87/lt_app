@@ -30,11 +30,21 @@ from lt_app.src.etl_report_statistics import (
     EtlReportStatisticsResult,
     EtlReportStatisticsSettings,
 )
+from lt_app.src.etl_stage_size_aggregates import (
+    EtlStageSizeAggregateBuilder,
+    EtlStageSizeAggregateResult,
+    EtlStageSizeAggregateSettings,
+)
 from lt_app.src.etl_statistics_projection import (
     EtlProjectionProgress,
     EtlStatisticsProjectionBuilder,
     EtlStatisticsProjectionResult,
     EtlStatisticsProjectionSettings,
+)
+from lt_app.src.etl_throughput_aggregates import (
+    EtlThroughputAggregateBuilder,
+    EtlThroughputAggregateResult,
+    EtlThroughputAggregateSettings,
 )
 from lt_app.src.kafka_event_generator import (
     KafkaEventGenerator,
@@ -75,6 +85,10 @@ class SessionProgress:
     :ivar collector: Последний сохранённый артефакт или ``None``.
     :ivar statistics: Прогресс построения статистики или ``None``.
     :ivar projection: Прогресс построения прогнозов или ``None``.
+    :ivar stage_size_aggregates: Результат периодического Stage/Size snapshot
+        или ``None``.
+    :ivar throughput_aggregates: Результат периодического Throughput snapshot
+        или ``None``.
     :ivar error: Сообщение об ошибке фазы или ``None``.
     :ivar timestamp: UTC-время создания события.
     """
@@ -86,6 +100,8 @@ class SessionProgress:
     collector: Optional[KafkaArtifactSaved] = None
     statistics: Optional[EtlReportStatisticsProgress] = None
     projection: Optional[EtlProjectionProgress] = None
+    stage_size_aggregates: Optional[EtlStageSizeAggregateResult] = None
+    throughput_aggregates: Optional[EtlThroughputAggregateResult] = None
     error: Optional[str] = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -104,6 +120,8 @@ class SessionResult:
     :ivar collector: Результат сборщика артефактов.
     :ivar statistics: Результат построения статистики.
     :ivar projection: Результат построения прогнозов.
+    :ivar stage_size_aggregates: Результат Stage/Size агрегатов или ``None``.
+    :ivar throughput_aggregates: Результат Throughput агрегатов или ``None``.
     :ivar error: Описание критической ошибки или ``None``.
     :ivar artifacts_dir: Каталог артефактов сессии.
     """
@@ -114,6 +132,8 @@ class SessionResult:
     collector: Optional[KafkaArtifactCollectorResult] = None
     statistics: Optional[EtlReportStatisticsResult] = None
     projection: Optional[EtlStatisticsProjectionResult] = None
+    stage_size_aggregates: Optional[EtlStageSizeAggregateResult] = None
+    throughput_aggregates: Optional[EtlThroughputAggregateResult] = None
     error: Optional[str] = None
     artifacts_dir: Optional[Path] = None
 
@@ -131,8 +151,11 @@ class SessionWorker:
     :param collector_settings: Настройки Kafka artifact collector.
     :param statistics_settings: Настройки построения статистики ETL-отчётов.
     :param projection_settings: Настройки построения регрессионных прогнозов.
+    :param stage_size_settings: Настройки Stage/Size агрегатов.
+    :param throughput_settings: Настройки Throughput агрегатов.
     :param session_id: Идентификатор тестовой сессии.
     :param progress_queue: Очередь для передачи событий прогресса в UI.
+    :param report_interval_sec: Интервал периодических snapshot (60–3600).
     """
 
     def __init__(
@@ -142,11 +165,15 @@ class SessionWorker:
         collector_settings: KafkaArtifactCollectorSettings,
         statistics_settings: EtlReportStatisticsSettings,
         projection_settings: EtlStatisticsProjectionSettings,
+        stage_size_settings: EtlStageSizeAggregateSettings,
+        throughput_settings: EtlThroughputAggregateSettings,
         session_id: str,
         progress_queue: queue.Queue[SessionProgress],
+        report_interval_sec: float,
     ) -> None:
         self._session_id = session_id
         self._progress_queue = progress_queue
+        self._report_interval_sec = report_interval_sec
 
         self._generator = KafkaEventGenerator(
             settings=generator_settings,
@@ -168,8 +195,15 @@ class SessionWorker:
             settings=projection_settings,
             progress_callback=self._on_projection_progress,
         )
+        self._stage_size = EtlStageSizeAggregateBuilder(
+            settings=stage_size_settings,
+        )
+        self._throughput = EtlThroughputAggregateBuilder(
+            settings=throughput_settings,
+        )
 
         self._stop_event = asyncio.Event()
+        self._latest_sent_messages: int = 0
 
     def stop(self) -> None:
         """Сигнализировать всем запущенным модулям о необходимости штатной остановки."""
@@ -179,22 +213,47 @@ class SessionWorker:
         """
         Запустить полный жизненный цикл тестовой сессии.
 
-        Фаза 1: параллельно generator, monitor, collector.
+        Фаза 1: параллельно generator, monitor, collector с периодическими
+        snapshot-ами агрегатов.
         Фаза 2: последовательно statistics builder.
         Фаза 3: последовательно projection builder.
+        Фаза 4: последовательно stage_size_aggregates builder.
+        Фаза 5: последовательно throughput_aggregates builder.
 
         :returns: Итоговый результат сессии с результатами всех выполненных фаз.
         """
         logger.info("Session %s: starting", self._session_id)
 
         try:
-            gen_result, mon_result, col_result = await self._run_phase1()
+            snapshot_task = asyncio.create_task(
+                self._periodic_snapshot_loop(),
+                name="periodic_snapshot",
+            )
+            try:
+                gen_result, mon_result, col_result = await self._run_phase1()
+            finally:
+                snapshot_task.cancel()
+                try:
+                    await snapshot_task
+                except asyncio.CancelledError:
+                    pass
+
+            postprocessing_stop_event = asyncio.Event()
 
             self._emit_progress(phase="statistics")
-            stats_result = await self._statistics.run(self._stop_event)
+            stats_result = await self._statistics.run(postprocessing_stop_event)
 
             self._emit_progress(phase="projection")
-            proj_result = await self._projection.run(self._stop_event)
+            proj_result = await self._projection.run(postprocessing_stop_event)
+
+            self._emit_progress(phase="stage_size_aggregates")
+            stage_result = await self._stage_size.run(postprocessing_stop_event)
+
+            self._emit_progress(phase="throughput_aggregates")
+            throughput_result = await self._throughput.run(
+                postprocessing_stop_event,
+                sent_messages=gen_result.sent_messages if gen_result else 0,
+            )
 
             result = SessionResult(
                 session_id=self._session_id,
@@ -203,6 +262,8 @@ class SessionWorker:
                 collector=col_result,
                 statistics=stats_result,
                 projection=proj_result,
+                stage_size_aggregates=stage_result,
+                throughput_aggregates=throughput_result,
                 artifacts_dir=col_result.output_directory
                 if col_result
                 else None,
@@ -333,6 +394,65 @@ class SessionWorker:
                     item,
                 )
 
+    async def _periodic_snapshot_loop(self) -> None:
+        """
+        Периодически пересчитывать все агрегаты, пока активна фаза 1.
+
+        Каждый тик — полный пересчёт с текущего состояния диска. При ошибке
+        тик логируется и цикл продолжается. Если на момент срабатывания
+        таймера stop_event уже установлен — тик пропускается.
+        """
+        while True:
+            await asyncio.sleep(self._report_interval_sec)
+
+            if self._stop_event.is_set():
+                continue
+
+            try:
+                stats_result = await self._statistics.run(self._stop_event)
+                proj_result = await self._projection.run(self._stop_event)
+                stage_result = await self._stage_size.run(self._stop_event)
+                throughput_result = await self._throughput.run(
+                    self._stop_event,
+                    sent_messages=self._latest_sent_messages,
+                )
+                self._emit_periodic_snapshot(stage_result, throughput_result)
+            except Exception:
+                logger.exception(
+                    "Session %s: periodic snapshot tick failed",
+                    self._session_id,
+                )
+
+    def _emit_periodic_snapshot(
+        self,
+        stage_result: EtlStageSizeAggregateResult,
+        throughput_result: EtlThroughputAggregateResult,
+    ) -> None:
+        """
+        Отправить результат периодического snapshot в UI-очередь.
+
+        Событие содержит только новые aggregate-поля; существующие поля
+        statistics/projection остаются ``None``, так как они типизированы
+        под progress-события, а не под final results.
+
+        :param stage_result: Результат Stage/Size агрегатов этого тика.
+        :param throughput_result: Результат Throughput агрегатов этого тика.
+        """
+        try:
+            self._progress_queue.put_nowait(
+                SessionProgress(
+                    session_id=self._session_id,
+                    phase="running",
+                    stage_size_aggregates=stage_result,
+                    throughput_aggregates=throughput_result,
+                )
+            )
+        except asyncio.QueueFull:
+            logger.warning(
+                "Session %s: progress queue full for periodic snapshot",
+                self._session_id,
+            )
+
     def _emit_progress(
         self,
         phase: str,
@@ -360,6 +480,7 @@ class SessionWorker:
             )
 
     def _on_generator_progress(self, progress: KafkaGeneratorProgress) -> None:
+        self._latest_sent_messages = progress.sent_messages
         self._emit_module_progress(
             SessionProgress(
                 session_id=self._session_id,

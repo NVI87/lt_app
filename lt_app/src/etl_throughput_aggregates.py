@@ -224,6 +224,13 @@ class EtlThroughputAggregateBuilder:
 
         wide = wide.sort_index()
 
+        full_minutes = pd.date_range(
+            start=wide.index.min(),
+            end=wide.index.max(),
+            freq="min",
+            tz=wide.index.tz,
+        )
+        wide = wide.reindex(full_minutes)
         wide = wide.ffill()
 
         cumulative_total = wide.sum(axis=1)

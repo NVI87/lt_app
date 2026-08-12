@@ -12,11 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import pandas as pd
 import streamlit as st
 import streamlit.runtime.scriptrunner
 import yaml
 
 from lt_app.src.worker import SessionProgress, SessionResult, SessionWorker
+
+RERUN_DELAY_SEC = 2.5
 
 # ---------------------------------------------------------------------------
 # Section A: Module defaults
@@ -54,6 +57,12 @@ MODULE_DEFAULTS: dict[str, dict[str, Any]] = {
         "target_sizes_mb": "1,5,10,25,50,100,200,500,1000",
         "allow_single_point_origin_fit": True, "clamp_negative_predictions": True,
     },
+    "stage_size": {
+        "source_done_csv_path": "", "output_csv_path": "",
+    },
+    "throughput": {
+        "source_monitor_csv_path": "", "output_csv_path": "",
+    },
 }
 
 MODULE_LABELS: dict[str, str] = {
@@ -62,6 +71,8 @@ MODULE_LABELS: dict[str, str] = {
     "collector": "Kafka Artifact Collector",
     "statistics": "ETL Report Statistics",
     "projection": "ETL Statistics Projection",
+    "stage_size": "Stage/Size Aggregates",
+    "throughput": "Throughput Aggregates",
 }
 
 # Per-module widget specs: field_name → (widget_type, label_override_or_None)
@@ -122,6 +133,14 @@ WIDGET_SPECS: dict[str, list[tuple[str, str, Optional[str]]]] = {
         ("allow_single_point_origin_fit", "checkbox", None),
         ("clamp_negative_predictions", "checkbox", None),
     ],
+    "stage_size": [
+        ("source_done_csv_path", "text", None),
+        ("output_csv_path", "text", None),
+    ],
+    "throughput": [
+        ("source_monitor_csv_path", "text", None),
+        ("output_csv_path", "text", None),
+    ],
 }
 
 
@@ -165,7 +184,9 @@ def build_settings_objects(
 ) -> Optional[dict[str, Any]]:
     """Собрать Pydantic Settings из словарей, сохранить validation_errors."""
     from lt_app.src.etl_report_statistics import EtlReportStatisticsSettings
+    from lt_app.src.etl_stage_size_aggregates import EtlStageSizeAggregateSettings
     from lt_app.src.etl_statistics_projection import EtlStatisticsProjectionSettings
+    from lt_app.src.etl_throughput_aggregates import EtlThroughputAggregateSettings
     from lt_app.src.kafka_event_generator import KafkaEventGeneratorSettings, KafkaTimestampMode
     from lt_app.src.kafka_json_artifact_collector import KafkaArtifactCollectorSettings, KafkaOffsetResetPolicy
     from lt_app.src.opensearch_index_monitor import OpenSearchIndexMonitorSettings
@@ -250,6 +271,24 @@ def build_settings_objects(
         )
     except Exception as exc:
         errors["projection"] = str(exc)
+
+    try:
+        ss = settings_dict["stage_size"]
+        result["stage_size"] = EtlStageSizeAggregateSettings(
+            source_done_csv_path=_parse_path(ss["source_done_csv_path"]),
+            output_csv_path=_parse_path(ss["output_csv_path"]),
+        )
+    except Exception as exc:
+        errors["stage_size"] = str(exc)
+
+    try:
+        t = settings_dict["throughput"]
+        result["throughput"] = EtlThroughputAggregateSettings(
+            source_monitor_csv_path=_parse_path(t["source_monitor_csv_path"]),
+            output_csv_path=_parse_path(t["output_csv_path"]),
+        )
+    except Exception as exc:
+        errors["throughput"] = str(exc)
 
     st.session_state.validation_errors = errors
     return None if errors else result
@@ -355,6 +394,18 @@ def render_settings_sidebar() -> None:
         for mod, err in st.session_state.validation_errors.items():
             st.sidebar.error(f"{mod}: {err}")
 
+    # Session Control
+    if st.session_state.get("report_interval_minutes") is None:
+        st.session_state.report_interval_minutes = 5
+    with st.sidebar.expander("Session Control", expanded=False):
+        st.session_state.report_interval_minutes = st.number_input(
+            "Report snapshot interval (minutes)",
+            min_value=1, max_value=60, step=1,
+            value=st.session_state.report_interval_minutes,
+            key="settings_report_interval_minutes",
+            disabled=running,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Section F: Background thread
@@ -366,6 +417,7 @@ def _run_worker_in_thread(
     worker_ref: list[Optional[SessionWorker]],
     result_ref: list[Optional[SessionResult]],
     session_id: str,
+    report_interval_sec: float,
 ) -> None:
     ctx = streamlit.runtime.scriptrunner.get_script_run_ctx()
     if ctx is not None:
@@ -381,8 +433,11 @@ def _run_worker_in_thread(
         collector_settings=settings_objects["collector"],
         statistics_settings=settings_objects["statistics"],
         projection_settings=settings_objects["projection"],
+        stage_size_settings=settings_objects["stage_size"],
+        throughput_settings=settings_objects["throughput"],
         session_id=session_id,
         progress_queue=progress_queue,
+        report_interval_sec=report_interval_sec,
     )
     worker_ref[0] = worker
     st.session_state.worker = worker
@@ -399,7 +454,41 @@ def _run_worker_in_thread(
 
 
 # ---------------------------------------------------------------------------
-# Section G: Main UI area
+# Section G: UI helpers
+# ---------------------------------------------------------------------------
+
+def _safe_read_preview_csv(path_str: str) -> Optional[pd.DataFrame]:
+    """Безопасно прочитать CSV для превью; вернуть None при любой ошибке."""
+    if not path_str:
+        return None
+    path = Path(path_str)
+    if not path.is_file():
+        return None
+    if path.stat().st_size == 0:
+        return None
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return None
+
+
+def _render_download_button(label: str, csv_path: Optional[Path]) -> None:
+    """Показать кнопку скачивания CSV или caption о недоступности."""
+    if csv_path is None or not csv_path.is_file():
+        st.caption(f"{label}: not available")
+        return
+    try:
+        data = csv_path.read_bytes()
+    except OSError:
+        st.caption(f"{label}: cannot read file")
+        return
+    st.download_button(
+        label=label, data=data, file_name=csv_path.name, mime="text/csv",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section H: Main UI area
 # ---------------------------------------------------------------------------
 
 def _drain_progress_queue() -> None:
@@ -468,6 +557,22 @@ def _render_phase_running() -> None:
                 st.text(f"topic={c.topic} part={c.partition} offset={c.offset}  "
                         f"saved={c.saved_messages}  path={c.output_path}")
 
+    # Aggregate previews
+    for label, module_key, path_key in [
+        ("Stage/Size Aggregates (preview)", "stage_size", "output_csv_path"),
+        ("Throughput Aggregates (preview)", "throughput", "output_csv_path"),
+    ]:
+        with st.expander(label, expanded=False):
+            path_str = str(
+                st.session_state.settings.get(module_key, {}).get(path_key, "")
+            )
+            df = _safe_read_preview_csv(path_str)
+            if df is not None:
+                st.dataframe(df)
+            else:
+                st.caption(f"{label.split(' (preview)')[0]}: not available yet")
+
+    time.sleep(RERUN_DELAY_SEC)
     st.rerun()
 
 
@@ -510,8 +615,50 @@ def _render_phase_done_or_failed() -> None:
         p = result.projection
         st.metric("Stage Models", p.stage_models)
 
+    if result.stage_size_aggregates:
+        ssa = result.stage_size_aggregates
+        st.metric("Stage/Size Source Rows", ssa.source_rows)
+        st.metric("Aggregate Rows", ssa.aggregate_rows)
+        st.metric("Excluded Unsized Rows", ssa.excluded_unsized_rows)
+        ssa_df = _safe_read_preview_csv(str(ssa.output_csv_path))
+        if ssa_df is not None:
+            st.subheader("Stage/Size Aggregates")
+            st.dataframe(ssa_df)
+
+    if result.throughput_aggregates:
+        ta = result.throughput_aggregates
+        st.metric("Throughput Minute Buckets", ta.minute_buckets)
+        st.metric("Throughput Source Rows", ta.source_rows)
+        ta_df = _safe_read_preview_csv(str(ta.output_csv_path))
+        if ta_df is not None:
+            st.subheader("Throughput Aggregates")
+            st.dataframe(ta_df)
+
     if result.artifacts_dir:
         st.caption(f"Artifacts: {result.artifacts_dir}")
+
+    # Download buttons for all CSV artifacts
+    st.subheader("Download Artifacts")
+    if result.statistics:
+        s = result.statistics
+        _render_download_button("DONE CSV", s.done_output_csv_path)
+        _render_download_button("Skipped CSV", s.skipped_output_csv_path)
+        _render_download_button("Read Failures CSV", s.read_failures_output_csv_path)
+    if result.projection:
+        p = result.projection
+        _render_download_button("Coefficients CSV", p.coefficients_output_csv_path)
+        _render_download_button("Stage Projection CSV", p.stage_projection_output_csv_path)
+        _render_download_button("Total Projection CSV", p.total_projection_output_csv_path)
+    if result.stage_size_aggregates:
+        _render_download_button(
+            "Stage/Size Aggregates CSV",
+            result.stage_size_aggregates.output_csv_path,
+        )
+    if result.throughput_aggregates:
+        _render_download_button(
+            "Throughput CSV",
+            result.throughput_aggregates.output_csv_path,
+        )
 
     _, col_right = st.columns([3, 1])
     with col_right:
@@ -526,7 +673,7 @@ def _render_phase_done_or_failed() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Section H: Main entry point
+# Section I: Main entry point
 # ---------------------------------------------------------------------------
 
 def main() -> None:
@@ -545,6 +692,7 @@ def main() -> None:
         "final_result": None,
         "progress_events": collections.deque(maxlen=500),
         "session_id": f"session-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
+        "report_interval_minutes": 5,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -570,7 +718,8 @@ def main() -> None:
             thread = threading.Thread(
                 target=_run_worker_in_thread,
                 args=(settings_objects, progress_queue, worker_ref, result_ref,
-                      st.session_state.session_id),
+                      st.session_state.session_id,
+                      float(st.session_state.report_interval_minutes * 60)),
                 daemon=True,
             )
             st.session_state.worker_thread = thread

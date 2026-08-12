@@ -15,14 +15,25 @@ from lt_app.src.worker import SessionProgress, SessionResult, SessionWorker
 
 
 class FakeKafkaEventGenerator:
-    """Возвращает готовый результат после задержки 0.1s."""
+    """Возвращает готовый результат после задержки."""
 
     def __init__(self, settings, progress_callback=None):
-        pass
+        self._progress_callback = progress_callback
 
     async def run(self, stop_event: asyncio.Event):
         await asyncio.sleep(0.1)
-        from lt_app.src.kafka_event_generator import KafkaGeneratorResult
+        from lt_app.src.kafka_event_generator import KafkaGeneratorProgress, KafkaGeneratorResult
+
+        if self._progress_callback:
+            self._progress_callback(
+                KafkaGeneratorProgress(
+                    sent_messages=100,
+                    max_messages=100,
+                    current_lag=5,
+                    source_offset=0,
+                    source_partition=0,
+                )
+            )
 
         return KafkaGeneratorResult(
             sent_messages=100,
@@ -123,9 +134,49 @@ class FakeEtlStatisticsProjectionBuilder:
         )
 
 
+class FakeEtlStageSizeAggregateBuilder:
+    """Сразу возвращает готовый результат."""
+
+    def __init__(self, settings, progress_callback=None):
+        pass
+
+    async def run(self, stop_event: asyncio.Event):
+        from lt_app.src.etl_stage_size_aggregates import (
+            EtlStageSizeAggregateResult,
+        )
+
+        return EtlStageSizeAggregateResult(
+            source_rows=22,
+            aggregate_rows=10,
+            excluded_unsized_rows=1,
+            stopped_by_request=False,
+            output_csv_path=Path("/tmp/fake_aggregates.csv"),
+        )
+
+
+class FakeEtlThroughputAggregateBuilder:
+    """Сразу возвращает готовый результат."""
+
+    def __init__(self, settings, progress_callback=None):
+        pass
+
+    async def run(self, stop_event: asyncio.Event, sent_messages: int):
+        from lt_app.src.etl_throughput_aggregates import (
+            EtlThroughputAggregateResult,
+        )
+
+        return EtlThroughputAggregateResult(
+            source_rows=20,
+            minute_buckets=3,
+            stopped_by_request=False,
+            output_csv_path=Path("/tmp/fake_throughput.csv"),
+        )
+
+
 def _build_fake_worker(
     progress_queue: queue.Queue,
     session_id: str = "test-session-1",
+    report_interval_sec: float = 9999.0,
 ) -> SessionWorker:
     """Создать SessionWorker с fake-модулями."""
     return SessionWorker(
@@ -134,8 +185,11 @@ def _build_fake_worker(
         collector_settings=None,
         statistics_settings=None,
         projection_settings=None,
+        stage_size_settings=None,
+        throughput_settings=None,
         session_id=session_id,
         progress_queue=progress_queue,
+        report_interval_sec=report_interval_sec,
     )
 
 
@@ -148,6 +202,8 @@ async def test_session_worker_happy_path():
         patch("lt_app.src.worker.KafkaJsonArtifactCollector", FakeKafkaJsonArtifactCollector),
         patch("lt_app.src.worker.EtlReportStatisticsBuilder", FakeEtlReportStatisticsBuilder),
         patch("lt_app.src.worker.EtlStatisticsProjectionBuilder", FakeEtlStatisticsProjectionBuilder),
+        patch("lt_app.src.worker.EtlStageSizeAggregateBuilder", FakeEtlStageSizeAggregateBuilder),
+        patch("lt_app.src.worker.EtlThroughputAggregateBuilder", FakeEtlThroughputAggregateBuilder),
     ]
 
     for p in patchers:
@@ -170,6 +226,10 @@ async def test_session_worker_happy_path():
         assert result.statistics.done_rows == 20
         assert result.projection is not None
         assert result.projection.stage_models == 4
+        assert result.stage_size_aggregates is not None
+        assert result.stage_size_aggregates.aggregate_rows == 10
+        assert result.throughput_aggregates is not None
+        assert result.throughput_aggregates.minute_buckets == 3
         assert result.artifacts_dir == Path("/tmp/fake_artifacts/session-1")
 
         phases_seen: list[str] = []
@@ -180,8 +240,99 @@ async def test_session_worker_happy_path():
         assert "running" in phases_seen
         assert "statistics" in phases_seen
         assert "projection" in phases_seen
+        assert "stage_size_aggregates" in phases_seen
+        assert "throughput_aggregates" in phases_seen
         assert "done" in phases_seen
         assert "failed" not in phases_seen
+
+    finally:
+        for p in patchers:
+            p.stop()
+
+
+class SlowFakeKafkaEventGenerator(FakeKafkaEventGenerator):
+    """Генератор с задержкой 0.3s для проверки периодических snapshot."""
+
+    async def run(self, stop_event: asyncio.Event):
+        await asyncio.sleep(0.3)
+        from lt_app.src.kafka_event_generator import KafkaGeneratorProgress, KafkaGeneratorResult
+
+        if self._progress_callback:
+            self._progress_callback(
+                KafkaGeneratorProgress(
+                    sent_messages=50,
+                    max_messages=100,
+                    current_lag=3,
+                    source_offset=0,
+                    source_partition=0,
+                )
+            )
+            self._progress_callback(
+                KafkaGeneratorProgress(
+                    sent_messages=100,
+                    max_messages=100,
+                    current_lag=5,
+                    source_offset=0,
+                    source_partition=0,
+                )
+            )
+
+        return KafkaGeneratorResult(
+            sent_messages=100,
+            stopped_by_request=False,
+            last_lag=5,
+        )
+
+
+@pytest.mark.asyncio
+async def test_session_worker_periodic_snapshots():
+    """Периодические тики: хотя бы один SessionProgress с phase="running" и
+    stage_size_aggregates is not None; существующие statistics/projection поля — None."""
+    patchers = [
+        patch("lt_app.src.worker.KafkaEventGenerator", SlowFakeKafkaEventGenerator),
+        patch("lt_app.src.worker.OpenSearchIndexMonitor", FakeOpenSearchIndexMonitor),
+        patch("lt_app.src.worker.KafkaJsonArtifactCollector", FakeKafkaJsonArtifactCollector),
+        patch("lt_app.src.worker.EtlReportStatisticsBuilder", FakeEtlReportStatisticsBuilder),
+        patch("lt_app.src.worker.EtlStatisticsProjectionBuilder", FakeEtlStatisticsProjectionBuilder),
+        patch("lt_app.src.worker.EtlStageSizeAggregateBuilder", FakeEtlStageSizeAggregateBuilder),
+        patch("lt_app.src.worker.EtlThroughputAggregateBuilder", FakeEtlThroughputAggregateBuilder),
+    ]
+
+    for p in patchers:
+        p.start()
+
+    try:
+        progress_queue = queue.Queue()
+        worker = _build_fake_worker(progress_queue, report_interval_sec=0.05)
+        result = await worker.run()
+
+        assert isinstance(result, SessionResult)
+        assert result.error is None
+        assert result.stage_size_aggregates is not None
+        assert result.throughput_aggregates is not None
+
+        periodic_ticks: list[SessionProgress] = []
+        while not progress_queue.empty():
+            event = progress_queue.get_nowait()
+            if (
+                event.phase == "running"
+                and event.stage_size_aggregates is not None
+            ):
+                periodic_ticks.append(event)
+
+        assert len(periodic_ticks) >= 1, (
+            "Expected at least one periodic snapshot tick"
+        )
+
+        for tick in periodic_ticks:
+            assert tick.stage_size_aggregates is not None
+            assert tick.throughput_aggregates is not None
+            assert tick.statistics is None, (
+                "Periodic tick must not populate statistics field"
+            )
+            assert tick.projection is None, (
+                "Periodic tick must not populate projection field"
+            )
 
     finally:
         for p in patchers:
@@ -204,6 +355,8 @@ async def test_session_worker_monitor_crash():
         patch("lt_app.src.worker.KafkaJsonArtifactCollector", FakeKafkaJsonArtifactCollector),
         patch("lt_app.src.worker.EtlReportStatisticsBuilder", FakeEtlReportStatisticsBuilder),
         patch("lt_app.src.worker.EtlStatisticsProjectionBuilder", FakeEtlStatisticsProjectionBuilder),
+        patch("lt_app.src.worker.EtlStageSizeAggregateBuilder", FakeEtlStageSizeAggregateBuilder),
+        patch("lt_app.src.worker.EtlThroughputAggregateBuilder", FakeEtlThroughputAggregateBuilder),
     ]
 
     for p in patchers:
