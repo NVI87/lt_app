@@ -461,12 +461,10 @@ def _safe_read_preview_csv(path_str: str) -> Optional[pd.DataFrame]:
     """Безопасно прочитать CSV для превью; вернуть None при любой ошибке."""
     if not path_str:
         return None
-    path = Path(path_str)
-    if not path.is_file():
-        return None
-    if path.stat().st_size == 0:
-        return None
     try:
+        path = Path(path_str)
+        if not path.is_file() or path.stat().st_size == 0:
+            return None
         return pd.read_csv(path)
     except Exception:
         return None
@@ -511,8 +509,6 @@ def _render_phase_running() -> None:
         if st.button("Stop Test", type="primary"):
             if worker is not None and worker_loop is not None:
                 worker_loop.call_soon_threadsafe(worker.stop)
-
-    time.sleep(1)
 
     future = st.session_state.worker_future
     if future is not None and future.done():
