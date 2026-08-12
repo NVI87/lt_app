@@ -172,6 +172,97 @@ git diff --check
 git diff
 ```
 
+## Running with Docker
+
+### 1. Build the image
+
+```bash
+docker build -t lt-app .
+```
+
+Run this from the repository root (where the `Dockerfile` is). The `-t lt-app` flag gives the image a name you can refer to later.
+
+### 2. Run the container
+
+Minimal run:
+
+```bash
+docker run -p 8501:8501 lt-app
+```
+
+To pass a `.env` file with Kafka/OpenSearch credentials and mount the artifacts directory so output files survive after the container stops:
+
+```bash
+docker run \
+  -p 8501:8501 \
+  --env-file .env \
+  -v "$(pwd)"/artifacts:/app/artifacts \
+  lt-app
+```
+
+To use a custom YAML settings file from the host instead of the one inside the image:
+
+```bash
+docker run \
+  -p 8501:8501 \
+  --env-file .env \
+  -v "$(pwd)"/artifacts:/app/artifacts \
+  -v "$(pwd)"/my-session-config.yaml:/app/settings_template.yaml \
+  lt-app
+```
+
+Breakdown of the flags:
+
+| Flag | Meaning |
+|---|---|
+| `-p 8501:8501` | Map host port 8501 to container port 8501 |
+| `--env-file .env` | Load environment variables from the host's `.env` file into the container |
+| `-v "$(pwd)"/artifacts:/app/artifacts` | Mount the host's `artifacts/` directory so session output is not lost when the container stops |
+| `-v "$(pwd)"/my-config.yaml:/app/settings_template.yaml` | Replace the container's YAML template with a host file |
+
+### 3. Open the app
+
+Open **http://localhost:8501** in your browser.
+
+### 4. Stop and remove the container
+
+If running in the foreground, press `Ctrl+C`.
+
+If running in the background (`docker run -d …`), find and stop it:
+
+```bash
+docker ps                # find the container ID
+docker stop <container-id>
+docker rm <container-id>
+```
+
+Or stop all at once by name (if you gave it one with `--name lt-app-session`):
+
+```bash
+docker stop lt-app-session && docker rm lt-app-session
+```
+
+> **⚠️ Important: `host.docker.internal` vs `localhost`**
+>
+> This app is a **client** — it connects to Kafka and OpenSearch that are typically exposed on your host machine via `kubectl port-forward` (bound to `localhost` on the host).
+>
+> **`localhost` inside a container refers to the container's own network namespace, not your host.** If your `.env` says `KAFKA_EVENT_GENERATOR_BOOTSTRAP_SERVERS=localhost:9092`, the container will try to reach Kafka inside itself — and fail.
+>
+> **On Docker Desktop (macOS / Windows):** replace `localhost` with `host.docker.internal` in your `.env`. This DNS name resolves to the host machine automatically.
+>
+> **On plain Linux Docker Engine:** `host.docker.internal` is not available by default. Add the following flag to your `docker run` command:
+>
+> ```bash
+> docker run --add-host=host.docker.internal:host-gateway ...
+> ```
+>
+> Then use `host.docker.internal` in your `.env` as above. If you use Docker Compose, the equivalent is:
+>
+> ```yaml
+> extra_hosts:
+>   - "host.docker.internal:host-gateway"
+> ```
+
 ## Разработка
 
 Точный способ запуска и зависимости будут зафиксированы после добавления `pyproject.toml` или `requirements.txt`. До этого не следует предполагать команды запуска, версии библиотек или доступность внешней Kafka/OpenSearch-инфраструктуры.

@@ -1,0 +1,66 @@
+# settings_template.yaml
+# YAML-шаблон настроек тестовой сессии lt_app.
+# Ключи верхнего уровня соответствуют модулям SessionWorker.
+# Поля с пометкой "required" не имеют значения по умолчанию и обязательны к заполнению.
+# Поля с пометкой "secret" задаются только через .env / переменные окружения и сюда не попадают.
+
+kafka_event_generator:
+  source_csv_path:  # required, Path
+  bootstrap_servers:  # required, str
+  target_topic:  # required, str
+  consumer_group_id:  # required, str
+  max_lag: 3  # int, >0
+  max_messages: 100  # int, >0
+  lag_control_enabled: true  # bool
+  lag_check_interval_sec: 1.0  # float, >0
+  lag_check_every_messages: 1  # int, >0
+  repeat_source: false  # bool
+  preserve_source_partition: false  # bool
+  timestamp_mode: broker  # KafkaTimestampMode: broker | create_time
+  message_delay_sec: 0.0  # float, >=0
+  security_protocol: PLAINTEXT  # str
+  # sasl_mechanism, sasl_username, sasl_password, ssl_cafile, ssl_certfile,
+  # ssl_keyfile — только через .env (secret / optional).
+
+opensearch_index_monitor:
+  host:  # required, str
+  port: 9200  # int, 1..65535
+  index_names:  # required, list[str], min 1 element
+  output_csv_path:  # required, Path
+  poll_interval_sec: 1.0  # float, >0
+  request_timeout_sec: 10.0  # float, >0
+  use_ssl: true  # bool
+  verify_certs: true  # bool
+  ssl_assert_hostname: true  # bool
+  ssl_show_warn: false  # bool
+  # username, password, ca_certs_path — только через .env (secret / optional).
+
+kafka_artifact_collector:
+  bootstrap_servers:  # required, str
+  topic:  # required, str
+  consumer_group_id:  # required, str
+  output_directory:  # required, Path
+  auto_offset_reset: earliest  # KafkaOffsetResetPolicy: earliest | latest
+  poll_timeout_ms: 1000  # int, >0
+  max_messages:  # Optional[int], >0, null = безлимитный сбор
+  security_protocol: PLAINTEXT  # str
+  # sasl_mechanism, sasl_username, sasl_password, ssl_cafile, ssl_certfile,
+  # ssl_keyfile — только через .env (secret / optional).
+
+etl_report_statistics:
+  source_directory:  # required, Path
+  done_output_csv_path:  # required, Path
+  skipped_output_csv_path:  # required, Path
+  read_failures_output_csv_path:  # required, Path
+  report_glob: "*.json"  # str
+  include_page_body_rows: true  # bool
+  sort_reports_by_name: true  # bool
+
+etl_statistics_projection:
+  source_done_csv_path:  # required, Path
+  coefficients_output_csv_path:  # required, Path
+  stage_projection_output_csv_path:  # required, Path
+  total_projection_output_csv_path:  # required, Path
+  target_sizes_mb: [1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0, 500.0, 1000.0]  # list[float]
+  allow_single_point_origin_fit: true  # bool
+  clamp_negative_predictions: true  # bool

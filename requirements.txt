@@ -7,3 +7,5 @@ python-dotenv
 
 # opensearch_index_monitor
 opensearch-py
+streamlit
+PyYAML

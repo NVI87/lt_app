@@ -2,3 +2,4 @@
 artifacts/
 .env
 .venv
+__pycache__
