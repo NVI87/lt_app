@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lt-app"
+version = "0.1.0"
+description = "ETL load-testing Streamlit application"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "streamlit>=1.30",
+    "pandas",
+    "numpy",
+    "pydantic>=2",
+    "pydantic-settings",
+    "PyYAML",
+    "aiokafka",
+    "kafka-python",
+    "opensearch-py",
+]
+
+[tool.setuptools.packages.find]
+include = ["lt_app*"]

@@ -1,0 +1,63 @@
+generator:
+  source_csv_path: "artifacts/nt-2026-08-13/kafka_events_minimal.csv"
+  bootstrap_servers: "kafka-test.internal:9093"
+  target_topic: "etl.load-test.input"
+  consumer_group_id: "etl-service-consumer-group"
+  max_lag: 3
+  max_messages: 100
+  lag_control_enabled: true
+  lag_check_interval_sec: 1.0
+  lag_check_every_messages: 1
+  repeat_source: false
+  preserve_source_partition: false
+  timestamp_mode: "BROKER"
+  message_delay_sec: 0.0
+  security_protocol: "PLAINTEXT"
+
+monitor:
+  host: "opensearch-test.internal"
+  port: 9200
+  index_names: "attachment_etl_release_tst,knowledge_etl_release_tst_lt_0"
+  output_csv_path: "artifacts/nt-2026-08-13/index_counts.csv"
+  poll_interval_sec: 1.0
+  request_timeout_sec: 10.0
+  use_ssl: true
+  verify_certs: true
+  ssl_assert_hostname: true
+  ssl_show_warn: false
+
+collector:
+  bootstrap_servers: "kafka-test.internal:9093"
+  topic: "etl.load-test.debug"
+  consumer_group_id: "etl-artifact-collector-group"
+  output_directory: "artifacts/nt-2026-08-13/reports"
+  auto_offset_reset: "latest"
+  poll_timeout_ms: 1000
+  max_messages: 0
+  security_protocol: "PLAINTEXT"
+
+statistics:
+  source_directory: "artifacts/nt-2026-08-13/reports"
+  done_output_csv_path: "artifacts/nt-2026-08-13/stats_done.csv"
+  skipped_output_csv_path: "artifacts/nt-2026-08-13/stats_skipped.csv"
+  read_failures_output_csv_path: "artifacts/nt-2026-08-13/stats_read_failures.csv"
+  report_glob: "*.json"
+  include_page_body_rows: true
+  sort_reports_by_name: true
+
+projection:
+  source_done_csv_path: "artifacts/nt-2026-08-13/stats_done.csv"
+  coefficients_output_csv_path: "artifacts/nt-2026-08-13/coefficients.csv"
+  stage_projection_output_csv_path: "artifacts/nt-2026-08-13/projection_by_stage.csv"
+  total_projection_output_csv_path: "artifacts/nt-2026-08-13/projection_total.csv"
+  target_sizes_mb: "1,5,10,25,50,100,200,500,1000"
+  allow_single_point_origin_fit: true
+  clamp_negative_predictions: true
+
+stage_size:
+  source_done_csv_path: "artifacts/nt-2026-08-13/stats_done.csv"
+  output_csv_path: "artifacts/nt-2026-08-13/stage_size_aggregates.csv"
+
+throughput:
+  source_monitor_csv_path: "artifacts/nt-2026-08-13/index_counts.csv"
+  output_csv_path: "artifacts/nt-2026-08-13/throughput_aggregates.csv"

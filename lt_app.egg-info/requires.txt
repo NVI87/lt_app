@@ -1,0 +1,9 @@
+streamlit>=1.30
+pandas
+numpy
+pydantic>=2
+pydantic-settings
+PyYAML
+aiokafka
+kafka-python
+opensearch-py
