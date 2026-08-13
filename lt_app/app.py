@@ -313,9 +313,13 @@ def apply_yaml_import(
             loaded = yaml_data[module_name]
             if isinstance(loaded, dict):
                 settings_dict[module_name].update(loaded)
+                for field, _widget_type, _label in WIDGET_SPECS.get(module_name, []):
+                    if field in loaded:
+                        st.session_state[f"settings_{module_name}_{field}"] = loaded[field]
             else:
                 st.warning(f"YAML key '{module_name}' is not a dict — skipping")
     build_settings_objects(settings_dict)
+    st.success("Imported settings applied. Review the sidebar values, then start the test.")
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +360,19 @@ def render_settings_sidebar() -> None:
     st.sidebar.header("Session Settings")
     running = st.session_state.phase == "running"
 
+    # YAML Import — must be before widget loop so widget keys are set before widget instantiation
+    uploaded_file = st.sidebar.file_uploader(
+        "Import settings from YAML", type=["yaml", "yml"], disabled=running,
+    )
+    if uploaded_file is not None:
+        try:
+            raw = uploaded_file.getvalue().decode("utf-8")
+            yaml_data = yaml.safe_load(raw)
+            if st.sidebar.button("Apply imported settings", disabled=running):
+                apply_yaml_import(st.session_state.settings, yaml_data)
+        except yaml.YAMLError as exc:
+            st.sidebar.error(f"YAML parse error: {exc}")
+
     for module_name in MODULE_DEFAULTS:
         with st.sidebar.expander(MODULE_LABELS[module_name], expanded=False):
             cfg = st.session_state.settings[module_name]
@@ -371,21 +388,6 @@ def render_settings_sidebar() -> None:
         label="Export settings to YAML", data=yaml_str,
         file_name="session_settings.yaml", mime="text/yaml", disabled=running,
     )
-
-    # YAML Import
-    st.sidebar.markdown("---")
-    uploaded_file = st.sidebar.file_uploader(
-        "Import settings from YAML", type=["yaml", "yml"], disabled=running,
-    )
-    if uploaded_file is not None:
-        try:
-            raw = uploaded_file.read().decode("utf-8")
-            yaml_data = yaml.safe_load(raw)
-            if st.sidebar.button("Apply imported settings", disabled=running):
-                apply_yaml_import(st.session_state.settings, yaml_data)
-                st.rerun()
-        except yaml.YAMLError as exc:
-            st.sidebar.error(f"YAML parse error: {exc}")
 
     # Validation errors
     if st.session_state.validation_errors:
