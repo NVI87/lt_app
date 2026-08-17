@@ -1,0 +1,85 @@
+run:
+  report_interval_minutes: 5
+generator:
+  source_csv_path: /tmp/lt_app/mock/source.csv
+  bootstrap_servers: localhost:9092
+  target_topic: etl.target.topic
+  consumer_group_id: etl-load-test-group
+  max_lag: 3
+  max_messages: 10
+  lag_control_enabled: true
+  lag_check_interval_sec: 1.0
+  lag_check_every_messages: 1
+  repeat_source: false
+  preserve_source_partition: false
+  timestamp_mode: broker
+  message_delay_sec: 0.0
+  security_protocol: PLAINTEXT
+  sasl_mechanism: ""
+  sasl_username: ""
+  sasl_password: ""
+  ssl_cafile: ""
+  ssl_certfile: ""
+  ssl_keyfile: ""
+monitor:
+  host: localhost
+  port: 9200
+  username: admin
+  password: admin
+  index_names:
+    - attachment_etl_release_tst
+    - knowledge_etl_release_tst_lt_0
+  output_csv_path: /tmp/lt_app/mock/monitor/output_csv_path.csv
+  poll_interval_sec: 1.0
+  request_timeout_sec: 10.0
+  use_ssl: true
+  verify_certs: true
+  ssl_assert_hostname: true
+  ssl_show_warn: false
+  ca_certs_path: ""
+collector:
+  bootstrap_servers: localhost:9092
+  topic: etl.diagnostics.topic
+  consumer_group_id: etl-load-test-group
+  output_directory: /tmp/lt_app/artifacts
+  auto_offset_reset: earliest
+  poll_timeout_ms: 1000
+  max_messages: 0
+  security_protocol: PLAINTEXT
+  sasl_mechanism: ""
+  sasl_username: ""
+  sasl_password: ""
+  ssl_cafile: ""
+  ssl_certfile: ""
+  ssl_keyfile: ""
+statistics:
+  source_directory: /tmp/lt_app/artifacts
+  done_output_csv_path: /tmp/lt_app/mock/statistics/done_output_csv_path.csv
+  skipped_output_csv_path: /tmp/lt_app/mock/statistics/skipped_output_csv_path.csv
+  read_failures_output_csv_path: /tmp/lt_app/mock/statistics/read_failures_output_csv_path.csv
+  report_glob: "*.json"
+  include_page_body_rows: true
+  sort_reports_by_name: true
+projection:
+  source_done_csv_path: /tmp/lt_app/mock/statistics/done_output_csv_path.csv
+  coefficients_output_csv_path: /tmp/lt_app/mock/projection/coefficients_output_csv_path.csv
+  stage_projection_output_csv_path: /tmp/lt_app/mock/projection/stage_projection_output_csv_path.csv
+  total_projection_output_csv_path: /tmp/lt_app/mock/projection/total_projection_output_csv_path.csv
+  target_sizes_mb:
+    - 1.0
+    - 5.0
+    - 10.0
+    - 25.0
+    - 50.0
+    - 100.0
+    - 200.0
+    - 500.0
+    - 1000.0
+  allow_single_point_origin_fit: true
+  clamp_negative_predictions: true
+stage_size:
+  source_done_csv_path: /tmp/lt_app/mock/statistics/done_output_csv_path.csv
+  output_csv_path: /tmp/lt_app/mock/stage_size/output_csv_path.csv
+throughput:
+  source_monitor_csv_path: /tmp/lt_app/mock/monitor/output_csv_path.csv
+  output_csv_path: /tmp/lt_app/mock/throughput/output_csv_path.csv

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
+import ssl
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -36,8 +37,7 @@ from typing import Any, Callable, Optional
 from aiokafka import AIOKafkaProducer
 from kafka import KafkaAdminClient, KafkaConsumer
 from kafka.structs import TopicPartition
-from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 logger = logging.getLogger(__name__)
@@ -53,16 +53,9 @@ class KafkaTimestampMode(StrEnum):
     SOURCE = "source"
 
 
-class KafkaEventGeneratorSettings(BaseSettings):
+class KafkaEventGeneratorSettings(BaseModel):
     """
     Настройки генератора событий Kafka для нагрузочного тестирования.
-
-    Значения загружаются из переменных окружения и файла ``.env``.
-    Используется префикс ``KAFKA_EVENT_GENERATOR_``.
-
-    Пример переменной окружения::
-
-        KAFKA_EVENT_GENERATOR_TARGET_TOPIC=etl-test-topic
 
     :ivar source_csv_path: CSV-дамп сообщений для воспроизведения.
     :ivar bootstrap_servers: Строка Kafka bootstrap servers.
@@ -74,12 +67,7 @@ class KafkaEventGeneratorSettings(BaseSettings):
     :ivar preserve_source_partition: Использовать partition из CSV-дампа.
     """
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="KAFKA_EVENT_GENERATOR_",
-        extra="ignore",
-    )
+    model_config = ConfigDict(extra="ignore")
 
     source_csv_path: Path
     bootstrap_servers: str
@@ -100,7 +88,7 @@ class KafkaEventGeneratorSettings(BaseSettings):
     security_protocol: str = "PLAINTEXT"
     sasl_mechanism: Optional[str] = None
     sasl_username: Optional[str] = None
-    sasl_password: Optional[SecretStr] = None
+    sasl_password: Optional[str] = None
     ssl_cafile: Optional[Path] = None
     ssl_certfile: Optional[Path] = None
     ssl_keyfile: Optional[Path] = None
@@ -148,12 +136,24 @@ class KafkaEventGeneratorSettings(BaseSettings):
 
         return self
 
+    @property
+    def _has_ssl_files(self) -> bool:
+        """Return True when any SSL file path is a non-empty path."""
+        return any(
+            self._ssl_path(path)
+            for path in (self.ssl_cafile, self.ssl_certfile, self.ssl_keyfile)
+        )
+
+    @staticmethod
+    def _ssl_path(path: Optional[Path]) -> bool:
+        """Treat empty ``Path`` values as unset."""
+        return path is not None and str(path).strip() not in ("", ".")
+
     def kafka_connection_options(self) -> dict[str, Any]:
         """
         Собрать общие параметры подключения для aiokafka и kafka-python.
 
-        Пароль намеренно не логируется. В процесс передаётся только значение,
-        извлечённое из :class:`pydantic.SecretStr`.
+        Пароль намеренно не логируется и передаётся клиенту в исходном виде.
 
         :returns: Аргументы конструкторов Kafka-клиентов.
         """
@@ -169,18 +169,18 @@ class KafkaEventGeneratorSettings(BaseSettings):
             options["sasl_plain_username"] = self.sasl_username
 
         if self.sasl_password:
-            options["sasl_plain_password"] = (
-                self.sasl_password.get_secret_value()
+            options["sasl_plain_password"] = self.sasl_password
+
+        if self._has_ssl_files:
+            ctx = ssl.create_default_context(
+                cafile=str(self.ssl_cafile) if self._ssl_path(self.ssl_cafile) else None,
             )
-
-        if self.ssl_cafile:
-            options["ssl_cafile"] = str(self.ssl_cafile)
-
-        if self.ssl_certfile:
-            options["ssl_certfile"] = str(self.ssl_certfile)
-
-        if self.ssl_keyfile:
-            options["ssl_keyfile"] = str(self.ssl_keyfile)
+            if self._ssl_path(self.ssl_certfile):
+                ctx.load_cert_chain(
+                    certfile=str(self.ssl_certfile),
+                    keyfile=str(self.ssl_keyfile) if self._ssl_path(self.ssl_keyfile) else None,
+                )
+            options["ssl_context"] = ctx
 
         return options
 
@@ -426,13 +426,12 @@ class KafkaEventGenerator:
         :raises Exception: Ошибки Kafka и чтения CSV не проглатываются,
             чтобы внешний оркестратор мог пометить сессию как failed.
         """
-        events = read_replay_events(self._settings.source_csv_path)
         sent_messages = 0
         last_lag: Optional[int] = None
 
-        await self._producer.start()
-
         try:
+            await self._producer.start()
+            events = read_replay_events(self._settings.source_csv_path)
             while sent_messages < self._settings.max_messages:
                 for event in events:
                     if stop_event.is_set():

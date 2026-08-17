@@ -22,7 +22,7 @@ import queue
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from lt_app.src.etl_report_statistics import (
     EtlReportStatisticsBuilder,
@@ -160,13 +160,7 @@ class SessionWorker:
 
     def __init__(
         self,
-        generator_settings: KafkaEventGeneratorSettings,
-        monitor_settings: OpenSearchIndexMonitorSettings,
-        collector_settings: KafkaArtifactCollectorSettings,
-        statistics_settings: EtlReportStatisticsSettings,
-        projection_settings: EtlStatisticsProjectionSettings,
-        stage_size_settings: EtlStageSizeAggregateSettings,
-        throughput_settings: EtlThroughputAggregateSettings,
+        run_settings: dict[str, dict[str, Any]],
         session_id: str,
         progress_queue: queue.Queue[SessionProgress],
         report_interval_sec: float,
@@ -175,31 +169,33 @@ class SessionWorker:
         self._progress_queue = progress_queue
         self._report_interval_sec = report_interval_sec
 
+        rs_ = run_settings
+
         self._generator = KafkaEventGenerator(
-            settings=generator_settings,
+            settings=KafkaEventGeneratorSettings(**rs_.get("generator", {})),
             progress_callback=self._on_generator_progress,
         )
         self._monitor = OpenSearchIndexMonitor(
-            settings=monitor_settings,
+            settings=OpenSearchIndexMonitorSettings(**rs_.get("monitor", {})),
             progress_callback=self._on_monitor_progress,
         )
         self._collector = KafkaJsonArtifactCollector(
-            settings=collector_settings,
+            settings=KafkaArtifactCollectorSettings(**rs_.get("collector", {})),
             progress_callback=self._on_collector_progress,
         )
         self._statistics = EtlReportStatisticsBuilder(
-            settings=statistics_settings,
+            settings=EtlReportStatisticsSettings(**rs_.get("statistics", {})),
             progress_callback=self._on_statistics_progress,
         )
         self._projection = EtlStatisticsProjectionBuilder(
-            settings=projection_settings,
+            settings=EtlStatisticsProjectionSettings(**rs_.get("projection", {})),
             progress_callback=self._on_projection_progress,
         )
         self._stage_size = EtlStageSizeAggregateBuilder(
-            settings=stage_size_settings,
+            settings=EtlStageSizeAggregateSettings(**rs_.get("stage_size", {})),
         )
         self._throughput = EtlThroughputAggregateBuilder(
-            settings=throughput_settings,
+            settings=EtlThroughputAggregateSettings(**rs_.get("throughput", {})),
         )
 
         self._stop_event = asyncio.Event()

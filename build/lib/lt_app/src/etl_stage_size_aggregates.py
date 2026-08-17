@@ -30,7 +30,7 @@ from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict
 
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ OUTPUT_COLUMNS: tuple[str, ...] = (
 ProgressCallback = Callable[["EtlStageSizeAggregateProgress"], None]
 
 
-class EtlStageSizeAggregateSettings(BaseSettings):
+class EtlStageSizeAggregateSettings(BaseModel):
     """
     Настройки построения агрегатов по размеру и стадиям ETL.
 
@@ -65,12 +65,7 @@ class EtlStageSizeAggregateSettings(BaseSettings):
     :ivar output_csv_path: Выходной CSV агрегатов.
     """
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="ETL_STAGE_SIZE_AGGREGATES_",
-        extra="ignore",
-    )
+    model_config = ConfigDict(extra="ignore")
 
     source_done_csv_path: Path
     output_csv_path: Path

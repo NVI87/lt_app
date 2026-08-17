@@ -33,8 +33,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import pandas as pd
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 logger = logging.getLogger(__name__)
@@ -81,7 +80,7 @@ READ_FAILURE_COLUMNS: tuple[str, ...] = (
 ProgressCallback = Callable[["EtlReportStatisticsProgress"], None]
 
 
-class EtlReportStatisticsSettings(BaseSettings):
+class EtlReportStatisticsSettings(BaseModel):
     """
     Настройки построения статистики по JSON-отчётам ETL.
 
@@ -93,13 +92,6 @@ class EtlReportStatisticsSettings(BaseSettings):
     :ivar include_page_body_rows: Добавлять строку для DONE-документов
         без вложений.
     """
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="ETL_REPORT_STATISTICS_",
-        extra="ignore",
-    )
 
     source_directory: Path
     done_output_csv_path: Path

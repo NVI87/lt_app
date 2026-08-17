@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import pandas as pd
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ OUTPUT_COLUMNS: tuple[str, ...] = (
 ProgressCallback = Callable[["EtlThroughputAggregateProgress"], None]
 
 
-class EtlThroughputAggregateSettings(BaseSettings):
+class EtlThroughputAggregateSettings(BaseModel):
     """
     Настройки построения throughput-агрегатов.
 
@@ -53,12 +53,7 @@ class EtlThroughputAggregateSettings(BaseSettings):
     :ivar output_csv_path: Выходной однорядный CSV throughput.
     """
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="ETL_THROUGHPUT_AGGREGATES_",
-        extra="ignore",
-    )
+    model_config = ConfigDict(extra="ignore")
 
     source_monitor_csv_path: Path
     output_csv_path: Path

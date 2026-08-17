@@ -1,0 +1,51 @@
+run:
+  report_interval_minutes: 5
+
+generator:
+  source_csv_path: /data/sample.csv
+  bootstrap_servers: localhost:9092
+  target_topic: lt-app-test-topic
+  consumer_group_id: lt-app-generator-group
+  max_lag: 3
+  max_messages: 50
+
+monitor:
+  host: localhost
+  port: 9200
+  index_names:
+    - test-index-a
+    - test-index-b
+  output_csv_path: /data/monitor_counts.csv
+  use_ssl: false
+  verify_certs: false
+
+collector:
+  bootstrap_servers: localhost:9092
+  topic: lt-app-test-topic
+  consumer_group_id: lt-app-collector-group
+  output_directory: /data/artifacts
+
+statistics:
+  source_directory: /data/artifacts
+  done_output_csv_path: /data/stats_done.csv
+  skipped_output_csv_path: /data/stats_skipped.csv
+  read_failures_output_csv_path: /data/stats_read_failures.csv
+
+projection:
+  source_done_csv_path: /data/stats_done.csv
+  coefficients_output_csv_path: /data/coefficients.csv
+  stage_projection_output_csv_path: /data/stage_projection.csv
+  total_projection_output_csv_path: /data/total_projection.csv
+  target_sizes_mb:
+    - 1.0
+    - 5.0
+    - 10.0
+    - 50.0
+
+stage_size:
+  source_done_csv_path: /data/stats_done.csv
+  output_csv_path: /data/stage_size_aggregates.csv
+
+throughput:
+  source_monitor_csv_path: /data/monitor_counts.csv
+  output_csv_path: /data/throughput_aggregates.csv

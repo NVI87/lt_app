@@ -13,8 +13,8 @@
 в отдельной asyncio-задаче или worker-процессе и передаёт ``asyncio.Event``
 для штатной остановки.
 
-Настройки загружаются из environment variables или локального ``.env`` с
-префиксом ``OPENSEARCH_INDEX_MONITOR_``.
+Настройки передаются в конструктор модуля supervisor-ом из единого
+runtime-снимка; модуль не читает environment variables или ``.env``.
 
 .. note::
 
@@ -34,8 +34,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from opensearchpy import OpenSearch
-from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 logger = logging.getLogger(__name__)
@@ -43,21 +42,18 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[["OpenSearchIndexCount"], None]
 
 
-class OpenSearchIndexMonitorSettings(BaseSettings):
+class OpenSearchIndexMonitorSettings(BaseModel):
     """
     Настройки OpenSearch index monitor.
 
-    Список индексов передаётся через ``.env`` JSON-массивом. Например::
+    Список индексов передаётся как список строк. Например::
 
-        OPENSEARCH_INDEX_MONITOR_INDEX_NAMES=[
-          "attachment_etl_release_tst",
-          "knowledge_etl_release_tst_lt_0"
-        ]
+        ["attachment_etl_release_tst", "knowledge_etl_release_tst_lt_0"]
 
     :ivar host: DNS-имя или IP-адрес OpenSearch.
     :ivar port: TCP-порт OpenSearch.
     :ivar username: Имя пользователя basic authentication.
-    :ivar password: Пароль пользователя; хранится как SecretStr.
+    :ivar password: Пароль пользователя.
     :ivar index_names: Индексы, для которых снимается document count.
     :ivar output_csv_path: CSV-файл результатов текущей тестовой сессии.
     :ivar poll_interval_sec: Интервал между полными обходами индексов.
@@ -66,18 +62,11 @@ class OpenSearchIndexMonitorSettings(BaseSettings):
     :ivar request_timeout_sec: Таймаут одного OpenSearch-запроса.
     """
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="OPENSEARCH_INDEX_MONITOR_",
-        extra="ignore",
-    )
-
     host: str
     port: int = Field(default=9200, gt=0, le=65535)
 
     username: Optional[str] = None
-    password: Optional[SecretStr] = None
+    password: Optional[str] = None
 
     index_names: list[str] = Field(min_length=1)
     output_csv_path: Path
@@ -129,8 +118,8 @@ class OpenSearchIndexMonitorSettings(BaseSettings):
         """
         Собрать параметры создания клиента ``opensearch-py``.
 
-        Пароль не логируется и извлекается из :class:`pydantic.SecretStr`
-        только непосредственно перед созданием клиента.
+        Пароль не логируется и передаётся в клиент только непосредственно
+        перед его созданием.
 
         :returns: Аргументы конструктора :class:`opensearchpy.OpenSearch`.
         """
@@ -146,7 +135,7 @@ class OpenSearchIndexMonitorSettings(BaseSettings):
         if self.username is not None and self.password is not None:
             options["http_auth"] = (
                 self.username,
-                self.password.get_secret_value(),
+                self.password,
             )
 
         if self.ca_certs_path is not None:

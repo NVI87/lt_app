@@ -52,8 +52,7 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 import pandas as pd
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 logger = logging.getLogger(__name__)
@@ -126,13 +125,13 @@ class ProjectionMetric(StrEnum):
     RSS_PEAK_BYTES = "rss_peak_bytes"
 
 
-class EtlStatisticsProjectionSettings(BaseSettings):
+class EtlStatisticsProjectionSettings(BaseModel):
     """
     Настройки построения прогнозов ETL-обработки.
 
-    Список целевых размеров в ``.env`` задаётся JSON-массивом, например::
+    Список целевых размеров задаётся как список чисел, например::
 
-        ETL_STATISTICS_PROJECTION_TARGET_SIZES_MB=[1,5,10,50,100,500]
+        [1, 5, 10, 50, 100, 500]
 
     :ivar source_done_csv_path: CSV со статистикой DONE-стадий.
     :ivar coefficients_output_csv_path: Выходной CSV коэффициентов моделей.
@@ -143,13 +142,6 @@ class EtlStatisticsProjectionSettings(BaseSettings):
     :ivar allow_single_point_origin_fit: Разрешить грубую модель вида
         ``y = a * x`` при единственной точке или нулевом разбросе size.
     """
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="ETL_STATISTICS_PROJECTION_",
-        extra="ignore",
-    )
 
     source_done_csv_path: Path
     coefficients_output_csv_path: Path
