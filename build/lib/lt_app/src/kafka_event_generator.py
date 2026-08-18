@@ -353,9 +353,10 @@ def get_effective_consumer_lag(
             for partition in partitions
         ]
 
-        group_offsets = admin_client.list_consumer_group_offsets(
-            settings.consumer_group_id
+        result = admin_client.list_group_offsets(
+            {settings.consumer_group_id: None}
         )
+        group_offsets = result[settings.consumer_group_id]
         beginning_offsets = consumer.beginning_offsets(topic_partitions)
         end_offsets = consumer.end_offsets(topic_partitions)
 
